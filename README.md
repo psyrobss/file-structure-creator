@@ -56,3 +56,5 @@ Se você deseja contribuir, sinta-se à vontade para abrir issues ou enviar pull
 ## Licença
 
 Este projeto está licenciado sob a Licença MIT. Veja o arquivo [LICENSE](LICENSE) para mais detalhes.
+
+Uma versão em português da licença está disponível no arquivo [LICENSE_PT](LICENSE_PT), mas para fins legais, a versão em inglês é a oficial.
