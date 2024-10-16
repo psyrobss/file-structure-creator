@@ -2,16 +2,35 @@ import sys
 import os
 import re
 import logging
-from PyQt5.QtWidgets import (
+from PyQt6.QtWidgets import (
     QApplication, QWidget, QVBoxLayout, QHBoxLayout, QPushButton,
     QPlainTextEdit, QFileDialog, QLabel, QMessageBox, QStatusBar,
-    QComboBox, QTreeWidget, QTreeWidgetItem, QProgressBar
+    QTreeWidget, QTreeWidgetItem, QProgressBar, QHeaderView
 )
-from PyQt5.QtGui import QFont, QIcon
-from PyQt5.QtCore import Qt
+from PyQt6.QtGui import QFont, QIcon
+from PyQt6.QtCore import Qt
 
-# Configuração básica do logging para exibir mensagens no console
+# Configuração básica do logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
+
+class HierarchicalItem:
+    """
+    Classe que representa um item hierárquico (diretório ou arquivo).
+    """
+    def __init__(self, level, name, is_dir):
+        self.level = level
+        self.name = name
+        self.is_dir = is_dir
+
+    def __repr__(self):
+        tipo = "Diretório" if self.is_dir else "Arquivo"
+        return f"{' ' * (self.level * 4)}{self.name} ({tipo})"
+
+    def get_full_path(self, parent_path):
+        return os.path.join(parent_path, self.name)
+
+    def is_root(self):
+        return self.level == 0
 
 class FileStructureCreator(QWidget):
     INVALID_CHARACTERS = r'<>:"|?*'
@@ -21,78 +40,44 @@ class FileStructureCreator(QWidget):
         self.setWindowTitle("File Structure Creator")
         self.setGeometry(100, 100, 900, 700)
         self.selected_directory = ""
-        self.parsed_structure = []  # Armazena a estrutura analisada
-        self.base_path = None  # Caminho da pasta raiz
-        self.expected_indent = 4
-        self.indent_str = '    '
-        self.hier_symbols = {
-            'branch': '├── ',
-            'last_branch': '└── ',
-            'vertical': '│   ',
-            'none': '    '
-        }
+        self.parsed_structure = []
         self.init_ui()
 
     def init_ui(self):
         main_layout = QVBoxLayout()
         self.setLayout(main_layout)
 
-        # Configuração de indentação e símbolos
-        config_layout = QHBoxLayout()
-        self.indent_label = QLabel("Tipo de Indentação:")
-        config_layout.addWidget(self.indent_label)
+        info_label = QLabel("Indentação: 4 espaços | Símbolos de hierarquia: ├──, └──, │")
+        main_layout.addWidget(info_label)
 
-        self.indent_combo = QComboBox()
-        self.indent_combo.addItems(["4 Espaços", "Tab"])
-        self.indent_combo.currentIndexChanged.connect(self.update_parser_settings)
-        config_layout.addWidget(self.indent_combo)
-
-        self.symbol_label = QLabel("Símbolos de Hierarquia:")
-        config_layout.addWidget(self.symbol_label)
-
-        self.symbol_combo = QComboBox()
-        self.symbol_combo.addItems(["Padrão (├──, └──, │)", "Simplificado (+--, |)"])
-        self.symbol_combo.currentIndexChanged.connect(self.update_parser_settings)
-        config_layout.addWidget(self.symbol_combo)
-
-        config_layout.addStretch()
-        main_layout.addLayout(config_layout)
-
-        # Seleção de diretório
         dir_layout = QHBoxLayout()
         self.dir_button = QPushButton("Selecionar Diretório de Destino")
-        icon = QIcon.fromTheme("folder")
-        if icon.isNull():
-            icon = QIcon("fallback_folder_icon.png")
-        self.dir_button.setIcon(icon)
         self.dir_button.clicked.connect(self.select_directory)
         dir_layout.addWidget(self.dir_button)
 
         self.dir_label = QLabel("Nenhum diretório selecionado.")
-        self.dir_label.setStyleSheet("font-weight: bold;")
         dir_layout.addWidget(self.dir_label)
         dir_layout.addStretch()
         main_layout.addLayout(dir_layout)
 
-        # Editor de texto para estrutura
         self.text_edit = QPlainTextEdit()
-        self.text_edit.setPlaceholderText("Cole a estrutura de arquivos e pastas aqui...")
-        font = QFont("Consolas", 11)
+        self.text_edit.setPlaceholderText("Cole aqui a estrutura de arquivos e pastas...")
+        font = QFont("Consolas", 10)
         self.text_edit.setFont(font)
         self.text_edit.textChanged.connect(self.validate_structure)
         main_layout.addWidget(self.text_edit)
 
-        # Pré-visualização com QTreeWidget
         self.tree_widget = QTreeWidget()
         self.tree_widget.setHeaderHidden(True)
+        self.tree_widget.setIndentation(20)
+        self.tree_widget.setAnimated(True)
+        self.tree_widget.setColumnCount(1)
         main_layout.addWidget(self.tree_widget)
 
-        # Label de erros
         self.error_label = QLabel("")
-        self.error_label.setStyleSheet("color: red;")
+        self.error_label.setStyleSheet("color: red; font-size: 10px;")
         main_layout.addWidget(self.error_label)
 
-        # Botão de criação da estrutura
         button_layout = QHBoxLayout()
         self.create_button = QPushButton("Criar Estrutura de Arquivos")
         self.create_button.clicked.connect(self.create_structure)
@@ -101,30 +86,27 @@ class FileStructureCreator(QWidget):
         button_layout.addStretch()
         main_layout.addLayout(button_layout)
 
-        # Barra de progresso
         self.progress_bar = QProgressBar()
         self.progress_bar.setValue(0)
         self.progress_bar.setTextVisible(True)
         self.progress_bar.setFormat("Progresso: %p%")
         main_layout.addWidget(self.progress_bar)
 
-        # Barra de status
         self.status_bar = QStatusBar()
         self.status_bar.showMessage("Pronto")
         main_layout.addWidget(self.status_bar)
 
-        # Aplicar estilos
         self.apply_styles()
 
     def apply_styles(self):
         self.setStyleSheet("""
             QWidget {
-                background-color: #f0f0f0;
+                background-color: #f8f8f8;
             }
             QPushButton {
                 background-color: #4CAF50;
                 color: white;
-                padding: 10px;
+                padding: 8px;
                 border: none;
                 border-radius: 5px;
             }
@@ -138,40 +120,25 @@ class FileStructureCreator(QWidget):
                 background-color: #ffffff;
                 border: 1px solid #ccc;
                 border-radius: 5px;
+                font-family: Consolas;
+                font-size: 12px;
             }
             QLabel {
                 font-size: 14px;
+                font-weight: bold;
             }
             QProgressBar {
                 text-align: center;
+                font-size: 12px;
+                color: black;
+                background-color: #e0e0e0;
+                border-radius: 5px;
+            }
+            QTreeWidget::item {
+                padding: 4px;
+                font-size: 10px;
             }
         """)
-
-    def update_parser_settings(self):
-        indent_type = self.indent_combo.currentText()
-        if indent_type == "4 Espaços":
-            self.expected_indent = 4
-            self.indent_str = '    '
-        elif indent_type == "Tab":
-            self.expected_indent = 1
-            self.indent_str = '\t'
-
-        symbol_set = self.symbol_combo.currentText()
-        if symbol_set == "Padrão (├──, └──, │)":
-            self.hier_symbols = {
-                'branch': '├── ',
-                'last_branch': '└── ',
-                'vertical': '│   ',
-                'none': '    '
-            }
-        elif symbol_set == "Simplificado (+--, |)":
-            self.hier_symbols = {
-                'branch': '+-- ',
-                'last_branch': '+-- ',
-                'vertical': '|   ',
-                'none': '    '
-            }
-        self.validate_structure()
 
     def select_directory(self):
         directory = QFileDialog.getExistingDirectory(self, "Selecionar Diretório de Destino", os.getcwd())
@@ -202,63 +169,54 @@ class FileStructureCreator(QWidget):
     def parse_structure(self, text):
         lines = text.splitlines()
         parsed_lines = []
-        previous_level = -1
+        indent_pattern = re.compile(r'^( *)')
 
         for idx, line in enumerate(lines, start=1):
             if not line.strip():
                 continue
 
-            # Remover todos os símbolos da árvore do início da linha
-            line_no_tree = re.sub(r'^[\│\├\└\─\+]+', '', line).strip()
+            line_no_tree = re.sub(r'[├└─│]+', '', line)
+            indent_match = indent_pattern.match(line_no_tree)
+            indent = indent_match.group(1) if indent_match else ''
+            level = len(indent) // 4
 
-            # Captura a indentação e o nome
-            pattern = r'^(?P<indent>(?:\s*)*)(?P<name>.+)$'
-            m = re.match(pattern, line_no_tree)
+            name = line_no_tree.strip()
+            if not name:
+                raise ValueError(f"Linha {idx}: Nome do arquivo ou diretório está vazio.")
 
-            if m:
-                indent = m.group('indent')
-                name = m.group('name').strip()
+            is_dir = name.endswith('/')
+            if is_dir:
+                name = name.rstrip('/')
 
-                # Calcula o nível de indentação
-                spaces = len(indent)
-                if spaces % self.expected_indent != 0:
-                    raise ValueError(f"Linha {idx}: Indentação inconsistente. Use {self.expected_indent} espaços por nível.")
-
-                level = spaces // self.expected_indent
-                if level > previous_level + 1:
-                    raise ValueError(f"Linha {idx}: Indentação incorreta.")
-
-                previous_level = level
-
-                # Verifica se o nome do arquivo ou diretório é válido
-                if not name:
-                    raise ValueError(f"Linha {idx}: O nome do arquivo ou diretório está vazio.")
-
-                # Verifica se é um diretório
-                is_dir = name.endswith('/')
-                if is_dir:
-                    name = name.rstrip('/')
-
-                parsed_lines.append((level, name, is_dir))
-            else:
-                raise ValueError(f"Linha {idx}: Não foi possível analisar a linha.")
+            item = HierarchicalItem(level, name, is_dir)
+            parsed_lines.append(item)
 
         return parsed_lines
 
     def update_tree_preview(self):
         self.tree_widget.clear()
         root_items = {}
-        for level, name, is_dir in self.parsed_structure:
-            item = QTreeWidgetItem([name + ('/' if is_dir else '')])
-            if level == 0:
-                self.tree_widget.addTopLevelItem(item)
-                root_items[level] = item
+
+        folder_icon = QIcon.fromTheme("folder")
+        file_icon = QIcon.fromTheme("text-x-generic")
+
+        for item in self.parsed_structure:
+            tree_item = QTreeWidgetItem([item.name + ('/' if item.is_dir else '')])
+            if item.is_dir:
+                tree_item.setIcon(0, folder_icon)
             else:
-                parent = root_items.get(level - 1)
+                tree_item.setIcon(0, file_icon)
+
+            if item.is_root():
+                self.tree_widget.addTopLevelItem(tree_item)
+                root_items[item.level] = tree_item
+            else:
+                parent = root_items.get(item.level - 1)
                 if parent:
-                    parent.addChild(item)
-                    if is_dir:
-                        root_items[level] = item
+                    parent.addChild(tree_item)
+                    if item.is_dir:
+                        root_items[item.level] = tree_item
+
         self.tree_widget.expandAll()
 
     def create_structure(self):
@@ -268,68 +226,47 @@ class FileStructureCreator(QWidget):
 
         try:
             stack = []
-            self.base_path = None  # Caminho da pasta raiz
-            total_items = len(self.parsed_structure)
-            created_items = 0
-            self.progress_bar.setValue(0)
-            self.progress_bar.setMaximum(total_items)
+            root_dir = "code_creator_app"
 
-            for idx, (level, name, is_dir) in enumerate(self.parsed_structure):
-                while len(stack) > level:
+            base_path = os.path.join(self.selected_directory, root_dir)
+            if not os.path.exists(base_path):
+                os.makedirs(base_path)
+            self.log_message(f"Diretório raiz criado: {base_path}")
+
+            for item in self.parsed_structure:
+                while len(stack) > item.level:
                     stack.pop()
 
-                if idx == 0:
-                    if not is_dir:
-                        raise Exception("O primeiro item deve ser um diretório raiz.")
-                    self.base_path = os.path.join(self.selected_directory, name)
-                    stack.append(name)
-                    if not os.path.exists(self.base_path):
-                        os.makedirs(self.base_path)
-                        self.log_message(f"Diretório raiz criado: {self.base_path}")
-                    else:
-                        self.log_message(f"Diretório raiz já existe: {self.base_path}")
-                    created_items += 1
-                    self.progress_bar.setValue(created_items)
-                    continue
+                parent_path = os.path.join(base_path, *stack)
+                full_path = item.get_full_path(parent_path)
 
-                current_path = os.path.join(self.base_path, *stack[1:], name)
-
-                if is_dir:
-                    stack.append(name)
-                    if not os.path.exists(current_path):
-                        os.makedirs(current_path)
-                        self.log_message(f"Diretório criado: {current_path}")
+                if item.is_dir:
+                    if not os.path.exists(full_path):
+                        os.makedirs(full_path)
+                    stack.append(item.name)
+                    self.log_message(f"Diretório criado: {full_path}")
                 else:
-                    dir_name = os.path.dirname(current_path)
+                    dir_name = os.path.dirname(full_path)
                     if not os.path.exists(dir_name):
                         os.makedirs(dir_name)
-                        self.log_message(f"Diretório criado para o arquivo: {dir_name}")
-                    with open(current_path, 'w', encoding='utf-8') as f:
-                        pass  # Cria um arquivo vazio
-                    self.log_message(f"Arquivo criado: {current_path}")
-
-                created_items += 1
-                self.progress_bar.setValue(created_items)
+                    with open(full_path, 'w', encoding='utf-8') as f:
+                        pass
+                    self.log_message(f"Arquivo criado: {full_path}")
 
             QMessageBox.information(self, "Sucesso", "Estrutura de arquivos criada com sucesso!")
             self.status_bar.showMessage("Estrutura criada com sucesso.")
-            self.progress_bar.setValue(total_items)
         except Exception as e:
             QMessageBox.critical(self, "Erro", f"Erro ao criar a estrutura: {str(e)}")
-            self.progress_bar.setValue(0)
 
     def log_message(self, message):
-        """
-        Exibe a mensagem no console e na barra de status da interface.
-        """
-        logging.info(message)  # Exibe no console
-        self.status_bar.showMessage(message)  # Exibe na barra de status
+        logging.info(message)
+        self.status_bar.showMessage(message)
 
 def main():
     app = QApplication(sys.argv)
     window = FileStructureCreator()
     window.show()
-    sys.exit(app.exec_())
+    sys.exit(app.exec())
 
 if __name__ == "__main__":
     main()
